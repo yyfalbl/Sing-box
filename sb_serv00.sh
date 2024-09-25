@@ -366,98 +366,119 @@ EOF
 
 # Download Dependency Files
 download_singbox() {
-  ARCH=$(uname -m) && DOWNLOAD_DIR="." && mkdir -p "$DOWNLOAD_DIR" && FILE_INFO=()
-  if [ "$ARCH" == "arm" ] || [ "$ARCH" == "arm64" ] || [ "$ARCH" == "aarch64" ]; then
-      FILE_INFO=("https://github.com/eooce/test/releases/download/arm64/sb web" "https://github.com/eooce/test/releases/download/arm64/bot13 bot" "https://github.com/eooce/test/releases/download/ARM/swith npm")
-  elif [ "$ARCH" == "amd64" ] || [ "$ARCH" == "x86_64" ] || [ "$ARCH" == "x86" ]; then
-      FILE_INFO=("https://github.com/eooce/test/releases/download/freebsd/sb web" "https://github.com/eooce/test/releases/download/freebsd/server bot" "https://github.com/eooce/test/releases/download/freebsd/npm npm")
-  else
-      echo "Unsupported architecture: $ARCH"
-      exit 1
-  fi
-declare -A FILE_MAP
-generate_random_name() {
-    local chars=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890
-    local name=""
-    for i in {1..6}; do
-        name="$name${chars:RANDOM%${#chars}:1}"
+    ARCH=$(uname -m)
+    DOWNLOAD_DIR="."
+    mkdir -p "$DOWNLOAD_DIR"
+    FILE_INFO=()
+
+    if [ "$ARCH" == "arm" ] || [ "$ARCH" == "arm64" ] || [ "$ARCH" == "aarch64" ]; then
+        FILE_INFO=("https://github.com/eooce/test/releases/download/arm64/sb web" "https://github.com/eooce/test/releases/download/arm64/bot13 bot" "https://github.com/eooce/test/releases/download/ARM/swith npm")
+    elif [ "$ARCH" == "amd64" ] || [ "$ARCH" == "x86_64" ] || [ "$ARCH" == "x86" ]; then
+        FILE_INFO=("https://github.com/eooce/test/releases/download/freebsd/sb web" "https://github.com/eooce/test/releases/download/freebsd/server bot" "https://github.com/eooce/test/releases/download/freebsd/npm npm")
+    else
+        echo "Unsupported architecture: $ARCH"
+        exit 1
+    fi
+
+    declare -A FILE_MAP
+
+    download_with_fallback() {
+        local URL=$1
+        local NEW_FILENAME=$2
+
+        curl -L -sS --max-time 2 -o "$NEW_FILENAME" "$URL" &
+        CURL_PID=$!
+        CURL_START_SIZE=$(stat -c%s "$NEW_FILENAME" 2>/dev/null || echo 0)
+        
+        sleep 1
+        CURL_CURRENT_SIZE=$(stat -c%s "$NEW_FILENAME" 2>/dev/null || echo 0)
+        
+        if [ "$CURL_CURRENT_SIZE" -le "$CURL_START_SIZE" ]; then
+            kill $CURL_PID 2>/dev/null
+            wait $CURL_PID 2>/dev/null
+            wget -q -O "$NEW_FILENAME" "$URL"
+            echo -e "\e[1;32mDownloading $NEW_FILENAME by wget\e[0m"
+        else
+            wait $CURL_PID
+            echo -e "\e[1;32mDownloading $NEW_FILENAME by curl\e[0m"
+        fi
+    }
+
+    for entry in "${FILE_INFO[@]}"; do
+        URL=$(echo "$entry" | cut -d ' ' -f 1)
+        RANDOM_NAME=$(generate_random_name)
+        NEW_FILENAME="$DOWNLOAD_DIR/$RANDOM_NAME"
+        
+        if [ -e "$NEW_FILENAME" ]; then
+            echo -e "\e[1;32m$NEW_FILENAME already exists, Skipping download\e[0m"
+        else
+            download_with_fallback "$URL" "$NEW_FILENAME"
+        fi
+        
+        chmod +x "$NEW_FILENAME"
+        FILE_MAP[$(echo "$entry" | cut -d ' ' -f 2)]="$NEW_FILENAME"
     done
-    echo "$name"
-}
-download_with_fallback() {
-    local URL=$1
-    local NEW_FILENAME=$2
+    wait
 
-    curl -L -sS --max-time 2 -o "$NEW_FILENAME" "$URL" &
-    CURL_PID=$!
-    CURL_START_SIZE=$(stat -c%s "$NEW_FILENAME" 2>/dev/null || echo 0)
-    
-    sleep 1
-    CURL_CURRENT_SIZE=$(stat -c%s "$NEW_FILENAME" 2>/dev/null || echo 0)
-    
-    if [ "$CURL_CURRENT_SIZE" -le "$CURL_START_SIZE" ]; then
-        kill $CURL_PID 2>/dev/null
-        wait $CURL_PID 2>/dev/null
-        wget -q -O "$NEW_FILENAME" "$URL"
-        echo -e "\e[1;32mDownloading $NEW_FILENAME by wget\e[0m"
-    else
-        wait $CURL_PID
-        echo -e "\e[1;32mDownloading $NEW_FILENAME by curl\e[0m"
-    fi
-}
+    start_services() {
+        # 启动 npm
+        if [ -e "${FILE_MAP[npm]}" ]; then
+            tlsPorts=("443" "8443" "2096" "2087" "2083" "2053")
+            if [[ "${tlsPorts[*]}" =~ "${NEZHA_PORT}" ]]; then
+                NEZHA_TLS="--tls"
+            else
+                NEZHA_TLS=""
+            fi
+            if [ -n "$NEZHA_SERVER" ] && [ -n "$NEZHA_PORT" ] && [ -n "$NEZHA_KEY" ]; then
+                export TMPDIR=$(pwd)
+                nohup ./"${FILE_MAP[npm]}" -s "${NEZHA_SERVER}:${NEZHA_PORT}" -p "${NEZHA_KEY}" ${NEZHA_TLS} >/dev/null 2>&1 &
+                sleep 2
+                pgrep -x "$(basename "${FILE_MAP[npm]}")" > /dev/null && green "$(basename "${FILE_MAP[npm]}") is running" || { 
+                    red "$(basename "${FILE_MAP[npm]}") is not running, restarting..."; 
+                    pkill -x "$(basename "${FILE_MAP[npm]}")" && nohup ./"${FILE_MAP[npm]}" -s "${NEZHA_SERVER}:${NEZHA_PORT}" -p "${NEZHA_KEY}" ${NEZHA_TLS} >/dev/null 2>&1 & 
+                    sleep 2; 
+                    purple "$(basename "${FILE_MAP[npm]}") restarted"; 
+                }
+            else
+                purple "NEZHA variable is empty, skipping running"
+            fi
+        fi
 
-for entry in "${FILE_INFO[@]}"; do
-    URL=$(echo "$entry" | cut -d ' ' -f 1)
-    RANDOM_NAME=$(generate_random_name)
-    NEW_FILENAME="$DOWNLOAD_DIR/$RANDOM_NAME"
-    
-    if [ -e "$NEW_FILENAME" ]; then
-        echo -e "\e[1;32m$NEW_FILENAME already exists, Skipping download\e[0m"
-    else
-        download_with_fallback "$URL" "$NEW_FILENAME"
-    fi
-    
-    chmod +x "$NEW_FILENAME"
-    FILE_MAP[$(echo "$entry" | cut -d ' ' -f 2)]="$NEW_FILENAME"
-done
-wait
+        # 启动 web
+        if [ -e "${FILE_MAP[web]}" ]; then
+            nohup ./"${FILE_MAP[web]}" run -c config.json >/dev/null 2>&1 &
+            sleep 2
+            pgrep -x "$(basename "${FILE_MAP[web]}")" > /dev/null && green "$(basename "${FILE_MAP[web]}") is running" || { 
+                red "$(basename "${FILE_MAP[web]}") is not running, restarting..."; 
+                pkill -x "$(basename "${FILE_MAP[web]}")" && nohup ./"${FILE_MAP[web]}" run -c config.json >/dev/null 2>&1 & 
+                sleep 2; 
+                purple "$(basename "${FILE_MAP[web]}") restarted"; 
+            }
+        fi
 
-if [ -e "$(basename ${FILE_MAP[npm]})" ]; then
-    tlsPorts=("443" "8443" "2096" "2087" "2083" "2053")
-    if [[ "${tlsPorts[*]}" =~ "${NEZHA_PORT}" ]]; then
-      NEZHA_TLS="--tls"
-    else
-      NEZHA_TLS=""
-    fi
-    if [ -n "$NEZHA_SERVER" ] && [ -n "$NEZHA_PORT" ] && [ -n "$NEZHA_KEY" ]; then
-        export TMPDIR=$(pwd)
-        nohup ./"$(basename ${FILE_MAP[npm]})" -s ${NEZHA_SERVER}:${NEZHA_PORT} -p ${NEZHA_KEY} ${NEZHA_TLS} >/dev/null 2>&1 &
+        # 启动 bot
+        if [ -e "${FILE_MAP[bot]}" ]; then
+            if [[ $ARGO_AUTH =~ ^[A-Z0-9a-z=]{120,250}$ ]]; then
+                args="tunnel --edge-ip-version auto --no-autoupdate --protocol http2 run --token ${ARGO_AUTH}"
+            elif [[ $ARGO_AUTH =~ TunnelSecret ]]; then
+                args="tunnel --edge-ip-version auto --config tunnel.yml run"
+            else
+                args="tunnel --edge-ip-version auto --no-autoupdate --protocol http2 --logfile boot.log --loglevel info --url http://localhost:$vmess_port"
+            fi
+            nohup ./"${FILE_MAP[bot]}" $args >/dev/null 2>&1 &
+            sleep 2
+            pgrep -x "$(basename "${FILE_MAP[bot]}")" > /dev/null && green "$(basename "${FILE_MAP[bot]}") is running" || { 
+                red "$(basename "${FILE_MAP[bot]}") is not running, restarting..."; 
+                pkill -x "$(basename "${FILE_MAP[bot]}")" && nohup ./"${FILE_MAP[bot]}" "${args}" >/dev/null 2>&1 & 
+                sleep 2; 
+                purple "$(basename "${FILE_MAP[bot]}") restarted"; 
+            }
+        fi
         sleep 2
-        pgrep -x "$(basename ${FILE_MAP[npm]})" > /dev/null && green "$(basename ${FILE_MAP[npm]}) is running" || { red "$(basename ${FILE_MAP[npm]}) is not running, restarting..."; pkill -x "$(basename ${FILE_MAP[npm]})" && nohup ./"$(basename ${FILE_MAP[npm]})" -s "${NEZHA_SERVER}:${NEZHA_PORT}" -p "${NEZHA_KEY}" ${NEZHA_TLS} >/dev/null 2>&1 & sleep 2; purple "$(basename ${FILE_MAP[npm]}) restarted"; }
-    else
-        purple "NEZHA variable is empty, skipping running"
-    fi
-fi
+    }
 
-if [ -e "$(basename ${FILE_MAP[web]})" ]; then
-    nohup ./"$(basename ${FILE_MAP[web]})" run -c config.json >/dev/null 2>&1 &
-    sleep 2
-    pgrep -x "$(basename ${FILE_MAP[web]})" > /dev/null && green "$(basename ${FILE_MAP[web]}) is running" || { red "$(basename ${FILE_MAP[web]}) is not running, restarting..."; pkill -x "$(basename ${FILE_MAP[web]})" && nohup ./"$(basename ${FILE_MAP[web]})" run -c config.json >/dev/null 2>&1 & sleep 2; purple "$(basename ${FILE_MAP[web]}) restarted"; }
-fi
-
-if [ -e "$(basename ${FILE_MAP[bot]})" ]; then
-    if [[ $ARGO_AUTH =~ ^[A-Z0-9a-z=]{120,250}$ ]]; then
-      args="tunnel --edge-ip-version auto --no-autoupdate --protocol http2 run --token ${ARGO_AUTH}"
-    elif [[ $ARGO_AUTH =~ TunnelSecret ]]; then
-      args="tunnel --edge-ip-version auto --config tunnel.yml run"
-    else
-      args="tunnel --edge-ip-version auto --no-autoupdate --protocol http2 --logfile boot.log --loglevel info --url http://localhost:$vmess_port"
-    fi
-    nohup ./"$(basename ${FILE_MAP[bot]})" $args >/dev/null 2>&1 &
-    sleep 2
-    pgrep -x "$(basename ${FILE_MAP[bot]})" > /dev/null && green "$(basename ${FILE_MAP[bot]}) is running" || { red "$(basename ${FILE_MAP[bot]}) is not running, restarting..."; pkill -x "$(basename ${FILE_MAP[bot]})" && nohup ./"$(basename ${FILE_MAP[bot]})" "${args}" >/dev/null 2>&1 & sleep 2; purple "$(basename ${FILE_MAP[bot]}) restarted"; }
-fi
- sleep 2
+    # 调用启动服务的函数
+    start_services
 }
 
 get_argodomain() {
