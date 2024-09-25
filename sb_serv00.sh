@@ -404,8 +404,8 @@ download_singbox() {
 
     for entry in "${FILE_INFO[@]}"; do
         URL=$(echo "$entry" | cut -d ' ' -f 1)
-        RANDOM_NAME=$(generate_random_name)
-        NEW_FILENAME="$DOWNLOAD_DIR/$RANDOM_NAME"
+        FILENAME=$(basename "$URL")  # 获取原始文件名
+        NEW_FILENAME="$DOWNLOAD_DIR/$FILENAME"
         
         if [ -e "$NEW_FILENAME" ]; then
             echo -e "\e[1;32m$NEW_FILENAME already exists, Skipping download\e[0m"
@@ -478,6 +478,7 @@ download_singbox() {
     # 调用启动服务的函数
     start_services
 }
+
 
 get_argodomain() {
   if [[ -n $ARGO_AUTH ]]; then
