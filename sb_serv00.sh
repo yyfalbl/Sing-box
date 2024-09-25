@@ -376,14 +376,6 @@ download_singbox() {
       exit 1
   fi
 declare -A FILE_MAP
-generate_random_name() {
-    local chars=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890
-    local name=""
-    for i in {1..6}; do
-        name="$name${chars:RANDOM%${#chars}:1}"
-    done
-    echo "$name"
-}
 
 download_with_fallback() {
     local URL=$1
@@ -458,8 +450,7 @@ if [ -e "$(basename ${FILE_MAP[bot]})" ]; then
     sleep 2
     pgrep -x "$(basename ${FILE_MAP[bot]})" > /dev/null && green "$(basename ${FILE_MAP[bot]}) is running" || { red "$(basename ${FILE_MAP[bot]}) is not running, restarting..."; pkill -x "$(basename ${FILE_MAP[bot]})" && nohup ./"$(basename ${FILE_MAP[bot]})" "${args}" >/dev/null 2>&1 & sleep 2; purple "$(basename ${FILE_MAP[bot]}) restarted"; }
 fi
-sleep 2
-rm -f "$(basename ${FILE_MAP[npm]})" "$(basename ${FILE_MAP[web]})" "$(basename ${FILE_MAP[bot]})"
+ sleep 2
 }
 
 get_argodomain() {
@@ -525,7 +516,7 @@ cat list.txt
 purple "\n$WORKDIR/list.txt saved successfully"
 purple "Running done!"
 sleep 2
-rm -rf boot.log config.json sb.log core tunnel.yml tunnel.json fake_useragent_0.2.0.json
+
 }
 
 menu() {
