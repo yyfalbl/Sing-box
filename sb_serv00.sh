@@ -376,7 +376,14 @@ download_singbox() {
       exit 1
   fi
 declare -A FILE_MAP
-
+generate_random_name() {
+    local chars=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890
+    local name=""
+    for i in {1..6}; do
+        name="$name${chars:RANDOM%${#chars}:1}"
+    done
+    echo "$name"
+}
 download_with_fallback() {
     local URL=$1
     local NEW_FILENAME=$2
